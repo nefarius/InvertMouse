@@ -66,7 +66,7 @@ $cabName = "InvertMouseDriver_$Architecture.cab"
 ) | Set-Content -Path $ddf -Encoding ASCII
 
 Get-ChildItem -Path $OutputDir -File | Where-Object { $_.Extension -in ".sys", ".inf", ".pdb" } | ForEach-Object {
-    Add-Content -Path $ddf -Value $_.FullName -Encoding ASCII
+    Add-Content -Path $ddf -Value ('"{0}"' -f $_.FullName) -Encoding ASCII
 }
 
 Push-Location $cabDir

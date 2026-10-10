@@ -146,11 +146,14 @@ if ($LASTEXITCODE) {
 
 $sysFiles = @()
 foreach ($platform in $Platforms) {
-    $sys = Join-Path $DriverDir ("{0}\Release\InvertMouse.sys" -f $platform)
-    if (-not (Test-Path -LiteralPath $sys)) {
-        throw "InvertMouse.sys not found for $platform"
+    $outSys = Join-Path $DriverDir ("{0}\Release\InvertMouse.sys" -f $platform)
+    $packageSys = Join-Path $DriverDir ("{0}\Release\InvertMouse\InvertMouse.sys" -f $platform)
+    foreach ($sys in @($outSys, $packageSys)) {
+        if (-not (Test-Path -LiteralPath $sys)) {
+            throw "InvertMouse.sys not found for $platform : $sys"
+        }
+        $sysFiles += $sys
     }
-    $sysFiles += $sys
 }
 
 Write-Step 'Stripping existing signatures'

@@ -13,6 +13,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $SourceDir) {
+    # Same package-directory SYS that Build-Release.ps1 signs before staging the CAB.
     $SourceDir = Join-Path $repoRoot "src\InvertMouseDriver\$Platform\$Configuration\InvertMouse"
 }
 

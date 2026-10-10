@@ -62,9 +62,6 @@ namespace DriverInstaller.Utils
         static extern bool ControlService(IntPtr hService, uint dwControl, ref SERVICE_STATUS lpServiceStatus);
 
         [DllImport(AdvApi32, SetLastError = true)]
-        static extern bool QueryServiceStatus(IntPtr hService, ref SERVICE_STATUS lpServiceStatus);
-
-        [DllImport(AdvApi32, SetLastError = true)]
         static extern bool CloseServiceHandle(IntPtr hSCObject);
 
         [DllImport(Kernel32, SetLastError = true, CharSet = CharSet.Unicode)]
@@ -305,7 +302,14 @@ namespace DriverInstaller.Utils
 
             if (deleteCreatedService && createdService)
             {
-                TryStopAndDeleteService();
+                try
+                {
+                    TryStopAndDeleteService();
+                }
+                catch
+                {
+                    // Keep the original install exception and continue file cleanup.
+                }
             }
 
             if (copiedFile && !hadFile)
@@ -362,7 +366,7 @@ namespace DriverInstaller.Utils
                         }
                     }
 
-                    return QueryServiceStillPresent(srv) || IsLoaded();
+                    return IsLoaded();
                 }
                 finally
                 {
@@ -373,12 +377,6 @@ namespace DriverInstaller.Utils
             {
                 CloseServiceHandle(scm);
             }
-        }
-
-        private static bool QueryServiceStillPresent(IntPtr srv)
-        {
-            var status = new SERVICE_STATUS();
-            return QueryServiceStatus(srv, ref status);
         }
 
         private bool RemoveDriverFile()
@@ -421,12 +419,14 @@ namespace DriverInstaller.Utils
                 out var size, IntPtr.Zero, IntPtr.Zero);
             var queryError = Marshal.GetLastWin32Error();
 
-            if (size == 0 || queryError == ERROR_FILE_NOT_FOUND || queryError == ERROR_INVALID_DATA)
+            if (queryError == ERROR_FILE_NOT_FOUND || queryError == ERROR_INVALID_DATA)
             {
-                if (queryError != ERROR_INSUFFICIENT_BUFFER)
-                {
-                    return "\0";
-                }
+                return "\0";
+            }
+
+            if (queryError != ERROR_INSUFFICIENT_BUFFER || size == 0)
+            {
+                throw new Win32Exception(queryError, "Read UpperFilters failed");
             }
 
             var buffer = new byte[Math.Max(size, 2u)];
