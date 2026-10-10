@@ -165,6 +165,7 @@ namespace DriverInstaller.Utils
             var hadService = HasService();
             var createdService = false;
             var copiedFile = false;
+            var replacedExisting = false;
             var scm = IntPtr.Zero;
 
             try
@@ -172,8 +173,10 @@ namespace DriverInstaller.Utils
                 if (hadFile)
                 {
                     var tmpDestPath = DriverDestPath + ".tmp";
-                    if (MoveFileEx(DriverDestPath, tmpDestPath, MOVEFILE_REPLACE_EXISTING))
-                        MoveFileEx(tmpDestPath, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                    if (!MoveFileEx(DriverDestPath, tmpDestPath, MOVEFILE_REPLACE_EXISTING))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to replace existing driver file");
+
+                    replacedExisting = true;
                 }
 
                 File.Copy(driverSourcePath, DriverDestPath, true);
@@ -205,7 +208,8 @@ namespace DriverInstaller.Utils
             }
             catch
             {
-                TryRollback(previousFilters, hadFile, copiedFile, createdService, !hadService && createdService);
+                TryRollback(previousFilters, hadFile, copiedFile, createdService, !hadService && createdService,
+                    replacedExisting);
                 throw;
             }
             finally
@@ -214,6 +218,11 @@ namespace DriverInstaller.Utils
                 {
                     CloseServiceHandle(scm);
                 }
+            }
+
+            if (replacedExisting)
+            {
+                MoveFileEx(DriverDestPath + ".tmp", null, MOVEFILE_DELAY_UNTIL_REBOOT);
             }
 
             return !IsLoaded() || NeedsRebootForFileReplace();
@@ -286,7 +295,7 @@ namespace DriverInstaller.Utils
         }
 
         private void TryRollback(string previousFilters, bool hadFile, bool copiedFile, bool createdService,
-            bool deleteCreatedService)
+            bool deleteCreatedService, bool replacedExisting)
         {
             try
             {
@@ -312,6 +321,12 @@ namespace DriverInstaller.Utils
                 }
             }
 
+            if (replacedExisting)
+            {
+                TryRestorePreviousDriver();
+                return;
+            }
+
             if (copiedFile && !hadFile)
             {
                 try
@@ -322,6 +337,42 @@ namespace DriverInstaller.Utils
                 {
                     // File may be locked; reboot cleanup is handled by a later uninstall.
                 }
+            }
+        }
+
+        private void TryRestorePreviousDriver()
+        {
+            var tmpDestPath = DriverDestPath + ".tmp";
+            if (!File.Exists(tmpDestPath))
+            {
+                return;
+            }
+
+            try
+            {
+                if (File.Exists(DriverDestPath))
+                {
+                    try
+                    {
+                        File.Delete(DriverDestPath);
+                    }
+                    catch
+                    {
+                        // Replacement may be locked; overwrite from the previous binary.
+                    }
+                }
+
+                if (!File.Exists(DriverDestPath) &&
+                    MoveFileEx(tmpDestPath, DriverDestPath, MOVEFILE_REPLACE_EXISTING))
+                {
+                    return;
+                }
+
+                File.Copy(tmpDestPath, DriverDestPath, true);
+            }
+            catch
+            {
+                // Keep the original install exception.
             }
         }
 

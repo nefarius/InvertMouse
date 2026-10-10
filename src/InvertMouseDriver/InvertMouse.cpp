@@ -49,8 +49,6 @@ ScaleLong(LONG value, double multiplier)
     if (scaled <= static_cast<double>(minLong)) {
         return minLong;
     }
-        return MINLONG;
-    }
 
     return static_cast<LONG>(scaled);
 }
