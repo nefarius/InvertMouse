@@ -12,18 +12,19 @@ namespace InvertMouse.Utils
 
         const uint FILE_DEVICE_MOUSE = 0x0000000f;
         const uint METHOD_BUFFERED = 0;
-        const uint FILE_ANY_ACCESS = 0;
+        const uint FILE_READ_ACCESS = 0x0001;
+        const uint FILE_WRITE_ACCESS = 0x0002;
         static uint CTL_CODE(uint deviceType, uint function, uint method, uint access)
             => ((deviceType << 16) | (access << 14) | (function << 2) | method);
 
         static readonly uint IOCTL_INVERTMOUSE_GET_SETTINGS =
-            CTL_CODE(FILE_DEVICE_MOUSE, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS);
+            CTL_CODE(FILE_DEVICE_MOUSE, 0x800, METHOD_BUFFERED, FILE_READ_ACCESS);
 
         static readonly uint IOCTL_INVERTMOUSE_SET_SETTINGS =
-            CTL_CODE(FILE_DEVICE_MOUSE, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS);
+            CTL_CODE(FILE_DEVICE_MOUSE, 0x801, METHOD_BUFFERED, FILE_WRITE_ACCESS);
 
         static readonly uint IOCTL_INVERTMOUSE_GET_VERSION =
-            CTL_CODE(FILE_DEVICE_MOUSE, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS);
+            CTL_CODE(FILE_DEVICE_MOUSE, 0x802, METHOD_BUFFERED, FILE_READ_ACCESS);
 
         [StructLayout(LayoutKind.Sequential)]
         public struct INVERTMOUSE_SETTINGS
@@ -141,10 +142,21 @@ namespace InvertMouse.Utils
 
         public bool SetSettings(INVERTMOUSE_SETTINGS settings)
         {
-            return _controlDevice != null && DeviceIoControl(_controlDevice, IOCTL_INVERTMOUSE_SET_SETTINGS,
+            if (_controlDevice == null || !IsFiniteMultiplier(settings.multiplier_x) ||
+                !IsFiniteMultiplier(settings.multiplier_y))
+            {
+                return false;
+            }
+
+            return DeviceIoControl(_controlDevice, IOCTL_INVERTMOUSE_SET_SETTINGS,
                 ref settings, Marshal.SizeOf<INVERTMOUSE_SETTINGS>(),
                 IntPtr.Zero, 0,
                 out _, IntPtr.Zero);
+        }
+
+        internal static bool IsFiniteMultiplier(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
 
         public void Dispose()

@@ -1,8 +1,10 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using InvertMouse.Utils;
 
 // ReSharper disable IdentifierTypo
 // ReSharper disable InconsistentNaming
@@ -11,13 +13,25 @@ namespace DriverInstaller.Utils
 {
     internal class DriverInstaller
     {
-        // WinAPI constants and imports
+        private const uint SC_MANAGER_CONNECT = 0x0001;
         private const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
         private const uint SERVICE_ALL_ACCESS = 0xF01FF;
+        private const uint SERVICE_QUERY_STATUS = 0x0004;
+        private const uint SERVICE_STOP = 0x0020;
+        private const uint DELETE = 0x10000;
         private const uint SERVICE_KERNEL_DRIVER = 0x00000001;
         private const uint SERVICE_DEMAND_START = 0x00000003;
         private const uint SERVICE_ERROR_NORMAL = 0x00000001;
+        private const uint SERVICE_CONTROL_STOP = 0x00000001;
         private const uint ERROR_SERVICE_DOES_NOT_EXIST = 1060;
+        private const uint ERROR_SERVICE_NOT_ACTIVE = 1062;
+        private const uint ERROR_SERVICE_MARKED_FOR_DELETE = 1072;
+        private const int ERROR_INSUFFICIENT_BUFFER = 122;
+        private const int ERROR_FILE_NOT_FOUND = 2;
+        private const int ERROR_INVALID_DATA = 13;
+
+        private const ushort IMAGE_FILE_MACHINE_AMD64 = 0x8664;
+        private const ushort IMAGE_FILE_MACHINE_ARM64 = 0xAA64;
 
         private const string AdvApi32 = "advapi32.dll";
         private const string Kernel32 = "kernel32.dll";
@@ -40,6 +54,12 @@ namespace DriverInstaller.Utils
             IntPtr hService, uint nServiceType, uint nStartType, uint nErrorControl,
             string lpBinaryPathName, string lpLoadOrderGroup, IntPtr lpdwTagId,
             string lpDependencies, string lpServiceStartName, string lpPassword, string lpDisplayName);
+
+        [DllImport(AdvApi32, SetLastError = true)]
+        static extern bool DeleteService(IntPtr hService);
+
+        [DllImport(AdvApi32, SetLastError = true)]
+        static extern bool ControlService(IntPtr hService, uint dwControl, ref SERVICE_STATUS lpServiceStatus);
 
         [DllImport(AdvApi32, SetLastError = true)]
         static extern bool CloseServiceHandle(IntPtr hSCObject);
@@ -96,12 +116,17 @@ namespace DriverInstaller.Utils
             uint nSize
         );
 
-        [DllImport(PsApi, SetLastError = true, CharSet = CharSet.Unicode)]
-        static extern uint GetDeviceDriverFileName(
-            IntPtr ImageBase,
-            [Out] StringBuilder lpFilename,
-            uint nSize
-        );
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SERVICE_STATUS
+        {
+            public uint dwServiceType;
+            public uint dwCurrentState;
+            public uint dwControlsAccepted;
+            public uint dwWin32ExitCode;
+            public uint dwServiceSpecificExitCode;
+            public uint dwCheckPoint;
+            public uint dwWaitHint;
+        }
 
         private void AddService(IntPtr scm)
         {
@@ -124,26 +149,50 @@ namespace DriverInstaller.Utils
             );
         }
 
-        public void Install(string driverSourcePath)
+        public bool Install(string driverSourcePath)
         {
+            var osVersion = Environment.OSVersion.Version;
+            if (osVersion.Major < 10)
+                throw new Exception("OS not supported, you need at least Windows 10");
+
+            if (!File.Exists(driverSourcePath))
+                throw new Exception("Can't find driver binary");
+
+            ValidateDriverBinary(driverSourcePath);
+
+            var previousFilters = GetFiltersValue();
+            var hadFile = File.Exists(DriverDestPath);
+            var hadService = HasService();
+            var createdService = false;
+            var copiedFile = false;
+            var replacedExisting = false;
             var scm = IntPtr.Zero;
+            var tmpDestPath = DriverDestPath + ".tmp";
+
             try
             {
-                var osVersion = Environment.OSVersion.Version;
-                if (osVersion.Major < 10)
-                    throw new Exception("OS not supported, you need at least Windows 10");
-
-                if (!File.Exists(driverSourcePath))
-                    throw new Exception("Can't find driver binary");
-
-                if (File.Exists(DriverDestPath))
+                if (hadFile)
                 {
-                    var tmpDestPath = DriverDestPath + ".tmp";
-                    if (MoveFileEx(DriverDestPath, tmpDestPath, MOVEFILE_REPLACE_EXISTING))
-                        MoveFileEx(tmpDestPath, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                    if (File.Exists(tmpDestPath) && File.Exists(GetPreservedBackupMarkerPath()))
+                    {
+                        replacedExisting = true;
+                    }
+                    else if (!MoveFileEx(DriverDestPath, tmpDestPath, MOVEFILE_REPLACE_EXISTING))
+                    {
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to replace existing driver file");
+                    }
+                    else
+                    {
+                        replacedExisting = true;
+                    }
+                }
+                else if (File.Exists(tmpDestPath))
+                {
+                    replacedExisting = true;
                 }
 
                 File.Copy(driverSourcePath, DriverDestPath, true);
+                copiedFile = true;
 
                 scm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
                 if (scm == IntPtr.Zero)
@@ -164,9 +213,18 @@ namespace DriverInstaller.Utils
                         throw new Win32Exception(error, "OpenService failed");
 
                     AddService(scm);
+                    createdService = true;
                 }
 
                 UpdateRegistry(true);
+            }
+            catch (Exception ex)
+            {
+                var recovery = TryRollback(previousFilters, hadFile, copiedFile, createdService,
+                    !hadService && createdService, replacedExisting);
+                if (!string.IsNullOrEmpty(recovery))
+                    throw new Exception(ex.Message + " " + recovery, ex);
+                throw;
             }
             finally
             {
@@ -175,45 +233,283 @@ namespace DriverInstaller.Utils
                     CloseServiceHandle(scm);
                 }
             }
+
+            if (replacedExisting)
+            {
+                MoveFileEx(tmpDestPath, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                TryDeletePreservedBackupMarker();
+            }
+
+            return !IsLoaded() || NeedsRebootForFileReplace();
         }
 
         public bool Uninstall()
         {
             var rebootRequired = UpdateRegistry(false);
-            var tmp = DriverDestPath + ".tmp";
-            if (File.Exists(DriverDestPath))
-            {
-                rebootRequired = true;
-
-                var renamed = MoveFileEx(DriverDestPath, tmp, MOVEFILE_REPLACE_EXISTING);
-                if (renamed)
-                {
-                    MoveFileEx(tmp, null, MOVEFILE_DELAY_UNTIL_REBOOT);
-                }
-                else
-                {
-                    try
-                    {
-                        File.Delete(DriverDestPath);
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-                }
-            }
-
-            return rebootRequired || File.Exists(tmp);
+            rebootRequired |= TryStopAndDeleteService();
+            rebootRequired |= RemoveDriverFile();
+            return rebootRequired || IsLoaded() || HasService();
         }
 
         public bool IsInstalled()
         {
-            return File.Exists(DriverDestPath) && HasDriverFilter();
+            return File.Exists(DriverDestPath) && HasDriverFilter() && HasService();
         }
 
         public bool IsInstalledPartially()
         {
-            return File.Exists(DriverDestPath) || HasDriverFilter();
+            return File.Exists(DriverDestPath) || HasDriverFilter() || HasService();
+        }
+
+        private void ValidateDriverBinary(string driverSourcePath)
+        {
+            var machine = ReadPeMachine(driverSourcePath);
+            var architecture = WinAPI.GetArchitecture();
+            ushort expected;
+            switch (architecture)
+            {
+                case "x64":
+                    expected = IMAGE_FILE_MACHINE_AMD64;
+                    break;
+                case "ARM64":
+                    expected = IMAGE_FILE_MACHINE_ARM64;
+                    break;
+                default:
+                    throw new Exception($"Unsupported architecture: {architecture ?? "unknown"}");
+            }
+
+            if (machine != expected)
+            {
+                throw new Exception(
+                    $"Driver architecture 0x{machine:X} does not match this system ({architecture})");
+            }
+
+            var version = FileVersionInfo.GetVersionInfo(driverSourcePath);
+            if (string.IsNullOrEmpty(version.FileVersion))
+            {
+                throw new Exception("Driver binary is missing a file version resource");
+            }
+        }
+
+        private static ushort ReadPeMachine(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var reader = new BinaryReader(stream))
+            {
+                if (reader.ReadUInt16() != 0x5A4D)
+                    throw new Exception("Driver binary is not a valid PE image");
+
+                stream.Seek(0x3C, SeekOrigin.Begin);
+                var lfanew = reader.ReadInt32();
+                stream.Seek(lfanew, SeekOrigin.Begin);
+                if (reader.ReadUInt32() != 0x00004550)
+                    throw new Exception("Driver binary is not a valid PE image");
+
+                return reader.ReadUInt16();
+            }
+        }
+
+        private string TryRollback(string previousFilters, bool hadFile, bool copiedFile, bool createdService,
+            bool deleteCreatedService, bool replacedExisting)
+        {
+            try
+            {
+                if (previousFilters != null)
+                {
+                    SetFiltersValue(previousFilters);
+                }
+            }
+            catch
+            {
+                // Keep the original install exception.
+            }
+
+            if (deleteCreatedService && createdService)
+            {
+                try
+                {
+                    TryStopAndDeleteService();
+                }
+                catch
+                {
+                    // Keep the original install exception and continue file cleanup.
+                }
+            }
+
+            if (replacedExisting)
+            {
+                return TryRestorePreviousDriver();
+            }
+
+            if (copiedFile && !hadFile)
+            {
+                try
+                {
+                    File.Delete(DriverDestPath);
+                }
+                catch
+                {
+                    // File may be locked; reboot cleanup is handled by a later uninstall.
+                }
+            }
+
+            return null;
+        }
+
+        private string GetPreservedBackupMarkerPath()
+        {
+            return DriverDestPath + ".tmp.preserved";
+        }
+
+        private void MarkBackupPreserved()
+        {
+            try
+            {
+                File.WriteAllText(GetPreservedBackupMarkerPath(), string.Empty);
+            }
+            catch
+            {
+                // Best-effort; the .tmp backup itself is still the recovery artifact.
+            }
+        }
+
+        private void TryDeletePreservedBackupMarker()
+        {
+            try
+            {
+                var marker = GetPreservedBackupMarkerPath();
+                if (File.Exists(marker))
+                {
+                    File.Delete(marker);
+                }
+            }
+            catch
+            {
+                // Ignore marker cleanup failures.
+            }
+        }
+
+        private string TryRestorePreviousDriver()
+        {
+            var tmpDestPath = DriverDestPath + ".tmp";
+            var recovery =
+                $"The previous driver backup was kept at '{tmpDestPath}'. Copy it to '{DriverDestPath}' to recover.";
+
+            if (!File.Exists(tmpDestPath))
+            {
+                return $"The previous driver backup is missing; expected '{tmpDestPath}'.";
+            }
+
+            try
+            {
+                if (File.Exists(DriverDestPath))
+                {
+                    File.Copy(tmpDestPath, DriverDestPath, true);
+                    TryDeletePreservedBackupMarker();
+                    return null;
+                }
+
+                if (MoveFileEx(tmpDestPath, DriverDestPath, 0))
+                {
+                    TryDeletePreservedBackupMarker();
+                    return null;
+                }
+
+                File.Copy(tmpDestPath, DriverDestPath, false);
+                TryDeletePreservedBackupMarker();
+                return null;
+            }
+            catch
+            {
+                MarkBackupPreserved();
+                return recovery;
+            }
+        }
+
+        private bool TryStopAndDeleteService()
+        {
+            var scm = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+            if (scm == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenSCManager failed");
+
+            try
+            {
+                var srv = OpenService(scm, DriverName, SERVICE_ALL_ACCESS | SERVICE_STOP | DELETE | SERVICE_QUERY_STATUS);
+                if (srv == IntPtr.Zero)
+                {
+                    var error = (uint)Marshal.GetLastWin32Error();
+                    if (error == ERROR_SERVICE_DOES_NOT_EXIST)
+                    {
+                        return false;
+                    }
+
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenService failed");
+                }
+
+                try
+                {
+                    var status = new SERVICE_STATUS();
+                    if (!ControlService(srv, SERVICE_CONTROL_STOP, ref status))
+                    {
+                        var error = (uint)Marshal.GetLastWin32Error();
+                        if (error != ERROR_SERVICE_NOT_ACTIVE && error != ERROR_SERVICE_MARKED_FOR_DELETE)
+                        {
+                            // In-use kernel filters typically cannot stop until reboot.
+                        }
+                    }
+
+                    if (!DeleteService(srv))
+                    {
+                        var error = (uint)Marshal.GetLastWin32Error();
+                        if (error != ERROR_SERVICE_DOES_NOT_EXIST && error != ERROR_SERVICE_MARKED_FOR_DELETE)
+                        {
+                            throw new Win32Exception(Marshal.GetLastWin32Error(), "DeleteService failed");
+                        }
+                    }
+
+                    return IsLoaded();
+                }
+                finally
+                {
+                    CloseServiceHandle(srv);
+                }
+            }
+            finally
+            {
+                CloseServiceHandle(scm);
+            }
+        }
+
+        private bool RemoveDriverFile()
+        {
+            var tmp = DriverDestPath + ".tmp";
+            if (!File.Exists(DriverDestPath))
+            {
+                return File.Exists(tmp);
+            }
+
+            var renamed = MoveFileEx(DriverDestPath, tmp, MOVEFILE_REPLACE_EXISTING);
+            if (renamed)
+            {
+                MoveFileEx(tmp, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                return true;
+            }
+
+            try
+            {
+                File.Delete(DriverDestPath);
+            }
+            catch
+            {
+                return true;
+            }
+
+            return File.Exists(DriverDestPath) || File.Exists(tmp);
+        }
+
+        private bool NeedsRebootForFileReplace()
+        {
+            return File.Exists(DriverDestPath + ".tmp");
         }
 
         private string GetFiltersValue()
@@ -222,11 +518,29 @@ namespace DriverInstaller.Utils
 
             SetupDiGetClassRegistryPropertyW(ref guid, SPCRP_UPPERFILTERS, out _, null, 0,
                 out var size, IntPtr.Zero, IntPtr.Zero);
+            var queryError = Marshal.GetLastWin32Error();
 
-            var buffer = new byte[size];
-            if (!SetupDiGetClassRegistryPropertyW(ref guid, SPCRP_UPPERFILTERS, out _, buffer, size, out _, IntPtr.Zero, IntPtr.Zero))
+            if (queryError == ERROR_FILE_NOT_FOUND || queryError == ERROR_INVALID_DATA)
             {
-                return null;
+                return "\0";
+            }
+
+            if (queryError != ERROR_INSUFFICIENT_BUFFER || size == 0)
+            {
+                throw new Win32Exception(queryError, "Read UpperFilters failed");
+            }
+
+            var buffer = new byte[Math.Max(size, 2u)];
+            if (!SetupDiGetClassRegistryPropertyW(ref guid, SPCRP_UPPERFILTERS, out _, buffer, (uint)buffer.Length,
+                    out _, IntPtr.Zero, IntPtr.Zero))
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error == ERROR_FILE_NOT_FOUND || error == ERROR_INVALID_DATA)
+                {
+                    return "\0";
+                }
+
+                throw new Win32Exception(error, "Read UpperFilters failed");
             }
 
             return Encoding.Unicode.GetString(buffer);
@@ -245,11 +559,36 @@ namespace DriverInstaller.Utils
             return value != null && GetDriverPosition(value) >= 0;
         }
 
+        private bool HasService()
+        {
+            var scm = OpenSCManager(null, null, SC_MANAGER_CONNECT);
+            if (scm == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                var srv = OpenService(scm, DriverName, SERVICE_QUERY_STATUS);
+                if (srv == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                CloseServiceHandle(srv);
+                return true;
+            }
+            finally
+            {
+                CloseServiceHandle(scm);
+            }
+        }
+
         private int GetDriverPosition(string value)
         {
             const string driverNameWithZero = DriverName + "\0";
 
-            if (value.StartsWith(driverNameWithZero))
+            if (value.StartsWith(driverNameWithZero, StringComparison.InvariantCultureIgnoreCase))
             {
                 return 0;
             }
@@ -275,7 +614,6 @@ namespace DriverInstaller.Utils
 
             string newStringValue;
 
-            // remove driver name
             var indexOf = GetDriverPosition(stringValue);
             if (indexOf >= 0)
             {
@@ -287,7 +625,6 @@ namespace DriverInstaller.Utils
                 newStringValue = stringValue;
             }
 
-            // add driver name if needed
             if (install)
             {
                 newStringValue = driverNameWithZero + newStringValue;

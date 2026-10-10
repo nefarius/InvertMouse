@@ -16,7 +16,7 @@ jobs:
 
     steps:
     - name: Check out repository code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
@@ -30,15 +30,20 @@ jobs:
         Configuration: ${{ matrix.configuration }}
         Platform: ${{ matrix.platform }}
 
-    - name: Create cab
-      run: makecab /f InvertMouse_${{ matrix.platform }}.ddf
-      working-directory: src/InvertMouseDriver
+    - name: Verify and stage package
+      shell: pwsh
+      run: |
+        $buildDir = "src\InvertMouseDriver\${{ matrix.platform }}\${{ matrix.configuration }}\InvertMouse"
+        $stageDir = "artifacts\${{ matrix.platform }}"
+        .\scripts\stage-driver-package.ps1 -BuildDir $buildDir -Architecture ${{ matrix.platform }} -OutputDir $stageDir
 
     - name: Upload binaries
       uses: actions/upload-artifact@v4
       with:
         name: InvertMouse-${{ matrix.platform }}
         path: |
-          src/InvertMouseDriver/${{ matrix.platform }}/${{ matrix.configuration }}/InvertMouse/InvertMouse.sys
-          src/InvertMouseDriver/${{ matrix.platform }}/${{ matrix.configuration }}/InvertMouse/InvertMouse.inf
-          src/InvertMouseDriver/disk1/InvertMouseDriver_${{ matrix.platform }}.cab
+          artifacts/${{ matrix.platform }}/InvertMouse.sys
+          artifacts/${{ matrix.platform }}/InvertMouse.inf
+          artifacts/${{ matrix.platform }}/InvertMouse.pdb
+          artifacts/${{ matrix.platform }}/InvertMouseDriver_${{ matrix.platform }}.cab
+        if-no-files-found: error

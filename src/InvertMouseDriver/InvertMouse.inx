@@ -1,0 +1,56 @@
+;
+; InvertMouse.inf
+;
+; KMDF Mouse-class upper filter that inverts and scales relative mouse
+; movement for games that lack a native invert-Y option.
+;
+; Copyright (c) 2021-2026 Oleg Stepanischev
+;
+; Author and project maintainer: Oleg Stepanischev
+; Code audit and code signing provider: Nefarius Software Solutions e.U.
+;
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = Mouse
+ClassGuid   = {4D36E96F-E325-11CE-BFC1-08002BE10318}
+Provider    = %ManufacturerName%
+DriverVer   = 10/04/2026,1.0.0.0
+CatalogFile = InvertMouse.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,
+
+[SourceDisksFiles]
+InvertMouse.sys = 1
+
+[DefaultInstall.NT$ARCH$]
+CopyFiles = InvertMouse_CopyFiles
+
+[DefaultInstall.NT$ARCH$.Services]
+AddService = InvertMouse,,InvertMouse_Service_Inst
+
+[DefaultInstall.NT$ARCH$.Wdf]
+KmdfService = InvertMouse, InvertMouse_WdfSect
+
+[InvertMouse_CopyFiles]
+InvertMouse.sys
+
+[InvertMouse_Service_Inst]
+DisplayName    = %ServiceName%
+ServiceType    = 1 ; SERVICE_KERNEL_DRIVER
+StartType      = 3 ; SERVICE_DEMAND_START
+ErrorControl   = 1
+ServiceBinary  = %12%\InvertMouse.sys
+
+[InvertMouse_WdfSect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+ManufacturerName = "InvertMouse Project"
+ServiceName = "InvertMouse Driver"
+DiskName = "InvertMouse Driver Installation Disk"
