@@ -167,15 +167,27 @@ namespace DriverInstaller.Utils
             var copiedFile = false;
             var replacedExisting = false;
             var scm = IntPtr.Zero;
+            var tmpDestPath = DriverDestPath + ".tmp";
 
             try
             {
                 if (hadFile)
                 {
-                    var tmpDestPath = DriverDestPath + ".tmp";
-                    if (!MoveFileEx(DriverDestPath, tmpDestPath, MOVEFILE_REPLACE_EXISTING))
+                    if (File.Exists(tmpDestPath) && File.Exists(GetPreservedBackupMarkerPath()))
+                    {
+                        replacedExisting = true;
+                    }
+                    else if (!MoveFileEx(DriverDestPath, tmpDestPath, MOVEFILE_REPLACE_EXISTING))
+                    {
                         throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to replace existing driver file");
-
+                    }
+                    else
+                    {
+                        replacedExisting = true;
+                    }
+                }
+                else if (File.Exists(tmpDestPath))
+                {
                     replacedExisting = true;
                 }
 
@@ -206,10 +218,12 @@ namespace DriverInstaller.Utils
 
                 UpdateRegistry(true);
             }
-            catch
+            catch (Exception ex)
             {
-                TryRollback(previousFilters, hadFile, copiedFile, createdService, !hadService && createdService,
-                    replacedExisting);
+                var recovery = TryRollback(previousFilters, hadFile, copiedFile, createdService,
+                    !hadService && createdService, replacedExisting);
+                if (!string.IsNullOrEmpty(recovery))
+                    throw new Exception(ex.Message + " " + recovery, ex);
                 throw;
             }
             finally
@@ -222,7 +236,8 @@ namespace DriverInstaller.Utils
 
             if (replacedExisting)
             {
-                MoveFileEx(DriverDestPath + ".tmp", null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                MoveFileEx(tmpDestPath, null, MOVEFILE_DELAY_UNTIL_REBOOT);
+                TryDeletePreservedBackupMarker();
             }
 
             return !IsLoaded() || NeedsRebootForFileReplace();
@@ -294,7 +309,7 @@ namespace DriverInstaller.Utils
             }
         }
 
-        private void TryRollback(string previousFilters, bool hadFile, bool copiedFile, bool createdService,
+        private string TryRollback(string previousFilters, bool hadFile, bool copiedFile, bool createdService,
             bool deleteCreatedService, bool replacedExisting)
         {
             try
@@ -323,8 +338,7 @@ namespace DriverInstaller.Utils
 
             if (replacedExisting)
             {
-                TryRestorePreviousDriver();
-                return;
+                return TryRestorePreviousDriver();
             }
 
             if (copiedFile && !hadFile)
@@ -338,41 +352,77 @@ namespace DriverInstaller.Utils
                     // File may be locked; reboot cleanup is handled by a later uninstall.
                 }
             }
+
+            return null;
         }
 
-        private void TryRestorePreviousDriver()
+        private string GetPreservedBackupMarkerPath()
+        {
+            return DriverDestPath + ".tmp.preserved";
+        }
+
+        private void MarkBackupPreserved()
+        {
+            try
+            {
+                File.WriteAllText(GetPreservedBackupMarkerPath(), string.Empty);
+            }
+            catch
+            {
+                // Best-effort; the .tmp backup itself is still the recovery artifact.
+            }
+        }
+
+        private void TryDeletePreservedBackupMarker()
+        {
+            try
+            {
+                var marker = GetPreservedBackupMarkerPath();
+                if (File.Exists(marker))
+                {
+                    File.Delete(marker);
+                }
+            }
+            catch
+            {
+                // Ignore marker cleanup failures.
+            }
+        }
+
+        private string TryRestorePreviousDriver()
         {
             var tmpDestPath = DriverDestPath + ".tmp";
+            var recovery =
+                $"The previous driver backup was kept at '{tmpDestPath}'. Copy it to '{DriverDestPath}' to recover.";
+
             if (!File.Exists(tmpDestPath))
             {
-                return;
+                return $"The previous driver backup is missing; expected '{tmpDestPath}'.";
             }
 
             try
             {
                 if (File.Exists(DriverDestPath))
                 {
-                    try
-                    {
-                        File.Delete(DriverDestPath);
-                    }
-                    catch
-                    {
-                        // Replacement may be locked; overwrite from the previous binary.
-                    }
+                    File.Copy(tmpDestPath, DriverDestPath, true);
+                    TryDeletePreservedBackupMarker();
+                    return null;
                 }
 
-                if (!File.Exists(DriverDestPath) &&
-                    MoveFileEx(tmpDestPath, DriverDestPath, MOVEFILE_REPLACE_EXISTING))
+                if (MoveFileEx(tmpDestPath, DriverDestPath, 0))
                 {
-                    return;
+                    TryDeletePreservedBackupMarker();
+                    return null;
                 }
 
-                File.Copy(tmpDestPath, DriverDestPath, true);
+                File.Copy(tmpDestPath, DriverDestPath, false);
+                TryDeletePreservedBackupMarker();
+                return null;
             }
             catch
             {
-                // Keep the original install exception.
+                MarkBackupPreserved();
+                return recovery;
             }
         }
 
