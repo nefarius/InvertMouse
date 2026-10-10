@@ -29,7 +29,7 @@ Microsoft regenerates catalog files during attestation. Submit an EV-signed CAB 
 | `InvertMouse.pdb` | Required for Microsoft crash analysis |
 | `InvertMouseDriver_<arch>.cab` | Attestation submission container (SYS/INF/PDB; no `.cat`) |
 
-Release packaging follows the same pattern as nssmkig: clean rebuild, refuse stale outputs, stage SYS/INF/PDB CABs, then optionally EV-sign.
+Release packaging follows the typical Nefarius driver development style and harness: clean rebuild, refuse stale outputs, stage SYS/INF/PDB CABs, then optionally EV-sign.
 
 ```powershell
 dotnet tool restore
