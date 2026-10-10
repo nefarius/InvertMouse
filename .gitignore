@@ -1,11 +1,59 @@
-bin/
-obj/
+# Visual Studio
+.vs/
 *.user
+*.suo
+*.userosscache
+*.sln.docstates
 *.filters
 *.DotSettings
-src/.vs
-src/RawAccel/wrapper/x64/
-src/packages/
-src/InvertMouseDriver/.vs
+*.VC.db
+*.VC.VC.opendb
+*.opendb
+*.aps
+ipch/
+
+# MSBuild / .NET
+[Bb]in/
+[Oo]bj/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.iobj
+*.ipdb
+*.pch
+*.idb
+*.tlog
+*.log
+*.cache
+*.recipe
+*.lastbuildstate
+*.nativecodeanalysis.xml
+*.FileListAbsolute.txt
+**/packages/
+
+# WDK / driver packaging
+*.cab
+*.cat
+*.cer
+*.sys
+*.res
+artifacts/
+disk1/
+.tools/
+
+# Intermediate architecture folders (do not ignore shipped driver/lib trees)
 src/InvertMouseDriver/x64/
+src/InvertMouseDriver/ARM64/
 src/InvertMouseDriver/arm64/
+src/InvertMouseDriver/Win32/
+src/RawAccel/wrapper/x64/
+src/RawAccel/wrapper/ARM64/
+src/RawAccel/wrapper/arm64/
+src/RawAccel/wrapper/Win32/
+src/RawAccel/wrapper/wrapper/
+
+# Shipped binaries that belong in source control
+!src/DriverInstaller/driver/**/*.sys
+!src/InvertMouse/lib/**/*.dll

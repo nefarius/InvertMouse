@@ -136,7 +136,12 @@ namespace DriverInstaller
 
             try
             {
-                _driverInstaller.Install(path);
+                var rebootRequired = _driverInstaller.Install(path);
+                if (rebootRequired)
+                {
+                    MessageBox.Show("The driver was installed. A reboot is required before it can load.",
+                        "Reboot required", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
             catch (Exception ex)
             {
@@ -155,7 +160,12 @@ namespace DriverInstaller
 
             try
             {
-                _driverInstaller.Uninstall();
+                var rebootRequired = _driverInstaller.Uninstall();
+                if (rebootRequired)
+                {
+                    MessageBox.Show("The driver was uninstalled. A reboot is required to finish removing it.",
+                        "Reboot required", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
             catch (Exception ex)
             {

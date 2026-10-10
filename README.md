@@ -21,8 +21,26 @@ Interception has no delay but can be detected by Vanguard and FaceIt.
 
 # InvertMouse Driver
 
-I wrote a separate driver for mouse inversion. It is anti-cheat friendly and has low delay when toggling inversion.  
-Looking for someone who can help with getting it signed.
+I wrote a separate driver for mouse inversion. It is anti-cheat friendly and has low delay when toggling inversion.
 
-- **Driver source code:** [https://github.com/oleg-st/InvertMouse/tree/dev/src/InvertMouseDriver](https://github.com/oleg-st/InvertMouse/tree/dev/src/InvertMouseDriver)
-- **Binaries for signing, built with GitHub Actions:** [https://github.com/oleg-st/InvertMouse/actions](https://github.com/oleg-st/InvertMouse/actions)
+The driver package is prepared for Partner Center attestation signing and direct/test deployment. Attestation is not a Windows Update retail certification; WHCP/HLK remains required for that bar. See [docs/driver-readiness.md](docs/driver-readiness.md).
+
+- **Driver source code:** [src/InvertMouseDriver](src/InvertMouseDriver)
+- **CI binaries for signing:** [GitHub Actions](https://github.com/oleg-st/InvertMouse/actions)
+- **Promote a validated SYS into the installer:** `.\scripts\promote-driver.ps1 -Platform x64`
+
+```powershell
+dotnet tool restore
+
+# Clean rebuild, freshness check, unsigned CABs
+.\scripts\Build-Release.ps1 -SkipSigning
+
+# Same, then EV-sign SYS and CABs
+.\scripts\Build-Release.ps1 -CertificateSubject "Your EV subject"
+
+# Confirm current Release outputs are newer than driver sources
+.\scripts\Test-BuildFreshness.ps1
+
+# Sign already-staged artifacts
+.\scripts\Sign-DriverPackage.ps1 -CertificateSubject "Your EV subject"
+```

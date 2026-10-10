@@ -76,7 +76,7 @@ namespace InvertMouse.Utils
                 case PROCESSOR_ARCHITECTURE_AMD64:
                     return "x64";
                 case PROCESSOR_ARCHITECTURE_ARM64:
-                    return "arm64";
+                    return "ARM64";
                 case PROCESSOR_ARCHITECTURE_ARM:
                     return "arm";
                 case PROCESSOR_ARCHITECTURE_IA64:

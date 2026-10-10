@@ -13,10 +13,17 @@
 #define NTDEVICE_NAME         L"\\Device\\invertmouse"
 #define SYMBOLIC_NAME_STRING  L"\\DosDevices\\invertmouse"
 
-// IOCTL codes
-#define IOCTL_INVERTMOUSE_GET_SETTINGS CTL_CODE(FILE_DEVICE_MOUSE, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_INVERTMOUSE_SET_SETTINGS CTL_CODE(FILE_DEVICE_MOUSE, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_INVERTMOUSE_GET_VERSION CTL_CODE(FILE_DEVICE_MOUSE, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+// SYSTEM and Administrators have full access; authenticated local users
+// can open the control device from the non-elevated InvertMouse app.
+#define CONTROL_DEVICE_SDDL \
+    L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)"
+
+#define IOCTL_INVERTMOUSE_GET_SETTINGS \
+    CTL_CODE(FILE_DEVICE_MOUSE, 0x800, METHOD_BUFFERED, FILE_READ_ACCESS)
+#define IOCTL_INVERTMOUSE_SET_SETTINGS \
+    CTL_CODE(FILE_DEVICE_MOUSE, 0x801, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+#define IOCTL_INVERTMOUSE_GET_VERSION \
+    CTL_CODE(FILE_DEVICE_MOUSE, 0x802, METHOD_BUFFERED, FILE_READ_ACCESS)
 
 constexpr int WRITE_DELAY_LONG = 1000;
 constexpr int WRITE_DELAY_SHORT = 100;
@@ -27,7 +34,6 @@ typedef struct _INVERTMOUSE_SETTINGS {
     double multiplier_y;
 } INVERTMOUSE_SETTINGS, * PINVERTMOUSE_SETTINGS;
 
-// Device extension holds our per-device state and upper driver callback
 typedef struct _DEVICE_EXTENSION {
     CONNECT_DATA UpperConnectData;
 } DEVICE_EXTENSION, * PDEVICE_EXTENSION;
@@ -45,10 +51,13 @@ EXTERN_C_START
 DRIVER_INITIALIZE DriverEntry;
 
 EVT_WDF_DRIVER_DEVICE_ADD EvtDeviceAdd;
+EVT_WDF_DRIVER_UNLOAD InvertMouseUnload;
+EVT_WDF_OBJECT_CONTEXT_CLEANUP EvtDeviceCleanup;
 EVT_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL EvtIoInternalDeviceControl;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL InvertMouseControl;
-VOID InvertMouseInit(WDFDRIVER);
-NTSTATUS CreateControlDevice(WDFDRIVER);
+
+VOID InvertMouseInit(_In_ WDFDRIVER Driver);
+NTSTATUS CreateControlDevice(_In_ WDFDRIVER Driver, _Out_ WDFDEVICE* ControlDevice);
 
 VOID InvertMouseCallback(
     IN PDEVICE_OBJECT DeviceObject,

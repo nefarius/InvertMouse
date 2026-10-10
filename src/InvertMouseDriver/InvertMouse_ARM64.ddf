@@ -17,3 +17,4 @@
 ;Specify files to be included in cab file
 ARM64\Release\InvertMouse\InvertMouse.sys
 ARM64\Release\InvertMouse\InvertMouse.inf
+ARM64\Release\InvertMouse.pdb

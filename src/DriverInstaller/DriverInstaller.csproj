@@ -83,6 +83,7 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <None Include="app.manifest" />
+    <!-- Promoted from a validated driver build via scripts/promote-driver.ps1. Do not copy unsigned local outputs here for release. -->
     <Content Include="driver\ARM64\InvertMouse.sys">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
