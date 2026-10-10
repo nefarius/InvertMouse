@@ -14,7 +14,7 @@ Microsoft regenerates catalog files during attestation. Submit an EV-signed CAB 
 
 - The mouse callback now snapshots settings under a spin lock and inspects every packet.
 - Non-finite multipliers are rejected; movement scaling saturates to `LONG`.
-- The filter device is always attached as a pass-through, including Safe Mode and control-device init failure.
+- The filter device attaches as a pass-through if control-device init fails. In Safe Mode, `EvtDeviceAdd` does not attach (Microsoft filter-driver guidance) and the control device is not created.
 - The control device ACL is SYSTEM + Administrators + authenticated users. IOCTLs use read/write access bits.
 - The INF is a per-architecture DefaultInstall/KMDF service package. It no longer binds `HID_DEVICE_SYSTEM_MOUSE` or writes `UpperFilters`.
 - `DriverInstaller` still prepends `InvertMouse` to the Mouse-class `UpperFilters` list so the filter stays below `mouclass`, and it now rolls back partial installs and deletes the SCM service on uninstall.
@@ -91,7 +91,7 @@ Do **not** enable Driver Verifier on a development host. Use a disposable VM.
 | V7 | USB + Bluetooth mice | 11 | x64 | Both devices invert; reconnect still connects |
 | V8 | Sleep/resume | 11 | x64 | Stack returns; inversion still applied |
 | V9 | Device disable/re-enable | 11 | x64 | CONNECT succeeds; no sharing-violation leak after restart |
-| V10 | Safe Mode | 11 | x64 | Filter attaches as pass-through; `\\.\invertmouse` is absent |
+| V10 | Safe Mode | 11 | x64 | Filter does not attach; mouse stack starts; `\\.\invertmouse` is absent |
 | V11 | Standard-user IOCTL | 11 | x64 | Authenticated user can GET/SET; guest/anonymous cannot |
 | V12 | Invalid multipliers | 11 | x64 | NaN/Inf rejected; extreme values saturate without bugcheck |
 | V13 | Secure Boot, no test signing | 11 | x64, ARM64 | Loads only with a Microsoft-trusted signature |

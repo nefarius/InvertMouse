@@ -399,6 +399,15 @@ EvtDeviceAdd(
 
     DebugPrint(("InvertMouse: Enter EvtDeviceAdd\n"));
 
+    // Filter drivers must not attach in Safe Mode. Return success without
+    // creating a device so the rest of the mouse stack can still start.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/determining-whether-the-operating-system-is-running-in-safe-mode
+    if (*InitSafeBootMode > 0) {
+        DebugPrint(("InvertMouse: Safe Mode; not attaching filter\n"));
+        WdfDeviceInitFree(DeviceInit);
+        return STATUS_SUCCESS;
+    }
+
     WdfFdoInitSetFilter(DeviceInit);
     WdfDeviceInitSetDeviceType(DeviceInit, FILE_DEVICE_MOUSE);
 
