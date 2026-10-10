@@ -1,3 +1,15 @@
+;
+; InvertMouse.inf
+;
+; KMDF Mouse-class upper filter that inverts and scales relative mouse
+; movement for games that lack a native invert-Y option.
+;
+; Copyright (c) 2021-2026 Oleg Stepanischev
+;
+; Author and project maintainer: Oleg Stepanischev
+; Code audit and code signing provider: Nefarius Software Solutions e.U.
+;
+
 [Version]
 Signature   = "$Windows NT$"
 Class       = Mouse
